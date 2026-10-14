@@ -131,6 +131,7 @@ contract StreamonadRegistry {
 </script>
 <script>
 const SOLC = "https://cdn.jsdelivr.net/npm/solc@0.8.26/soljson.js";
+const SOLC2 = "https://binaries.soliditylang.org/bin/soljson-v0.8.26+commit.8a97fa7a.js";
 const OZ = "https://cdn.jsdelivr.net/npm/@openzeppelin/contracts@5.0.2/";
 const CHAIN = {
   chainId: "0x279f",
@@ -143,14 +144,35 @@ const logEl = document.getElementById("log");
 const log = (m) => { logEl.textContent += "\n" + m; };
 const btn = document.getElementById("go");
 
-function loadSolc() {
-  return new Promise((resolve, reject) => {
-    window.Module = { onRuntimeInitialized() { resolve(window.Module); } };
+function loadScript(src) {
+  return new Promise((res, rej) => {
     const s = document.createElement("script");
-    s.src = SOLC;
-    s.onerror = () => reject(new Error("could not load solc from CDN"));
+    s.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error("failed to download " + src));
     document.head.appendChild(s);
   });
+}
+
+async function loadSolc() {
+  for (const u of [SOLC, SOLC2]) {
+    log("Downloading compiler from " + new URL(u).host + " (about 8MB, be patient)...");
+    let inited = false;
+    window.Module = { onRuntimeInitialized() { inited = true; } };
+    try { await loadScript(u); } catch (e) { log(e.message); continue; }
+    log("Downloaded. Starting compiler (can take 20-60s on a phone)...");
+    const t0 = Date.now();
+    let beat = 0;
+    while (Date.now() - t0 < 120000) {
+      const M = window.Module;
+      const fn = M && typeof M._solidity_compile === "function";
+      if (fn && (inited || M.calledRun || Date.now() - t0 > 10000)) return M;
+      if (Date.now() - t0 > beat * 10000) { beat++; log("...still starting (" + Math.round((Date.now() - t0) / 1000) + "s)"); }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    log("Compiler did not start in 120s from this source.");
+  }
+  throw new Error("Compiler failed to start. Reload and try again, or use Remix on a laptop.");
 }
 
 function resolvePath(from, p) {
